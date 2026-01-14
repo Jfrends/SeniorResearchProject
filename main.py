@@ -1,6 +1,6 @@
 from fastapi import FastAPI, HTTPException, UploadFile, File
 from database import users_collection, files_collection
-from datetime import datetime, UTC
+from datetime import datetime, timezone
 from pydantic import BaseModel
 from bson import ObjectId
 
@@ -80,7 +80,7 @@ async def list_files():
         })
     return files
 
-@app.post("/user/{user_id}/files")
+@app.post("/users/{user_id}/files")
 async def user_upload_file(user_id : str, path: str, file : UploadFile = File(...)):
     try:
         owner_id = ObjectId(user_id)
@@ -108,12 +108,12 @@ async def user_upload_file(user_id : str, path: str, file : UploadFile = File(..
         "folder_path": path,
         "minio_key": minio_key,
         "is_folder": False,
-        "upload_timestamp": str(datetime.now(UTC))
+        "upload_timestamp": datetime.now(timezone.utc).isoformat()
     })
 
     return {"id": str(result.inserted_id), "filename": file.filename}
 
-@app.post("/user/{user_id}/folders")
+@app.post("/users/{user_id}/folders")
 async def user_create_folder(user_id : str, folder: FolderCreate):
     try:
         owner_id = ObjectId(user_id)
@@ -135,7 +135,7 @@ async def user_create_folder(user_id : str, folder: FolderCreate):
         "owner_id": owner_id,
         "folder_path": folder.path,
         "is_folder": True,
-        "upload_timestamp": str(datetime.now(UTC))
+        "upload_timestamp": datetime.now(timezone.utc).isoformat()
     })
 
     return {"id": str(result.inserted_id), "filename": folder.filename}
