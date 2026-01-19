@@ -1,20 +1,29 @@
 from fastapi import FastAPI, HTTPException, UploadFile, File
-from database import users_collection, files_collection
 from datetime import datetime, timezone
-from pydantic import BaseModel
 from bson import ObjectId
-
-class UserCreate(BaseModel):
-    email: str
-    username: str
-    password: str
-
-class FolderCreate(BaseModel):
-    path: str
-    filename: str
+from fastapi.middleware.cors import CORSMiddleware
+from .database import users_collection, files_collection
+from .models import UserCreate, UserLogin, FolderCreate
+from .auth import (
+    register_user_controller,
+    login_user_controller,
+    authenticate_user,
+)
 
 app = FastAPI()
 port = 8000
+
+origins = [
+    "http://localhost:5173",  # Vite dev server
+]
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 @app.get("/")
 def root():
@@ -177,3 +186,12 @@ async def delete_folder(file_id : str):
         raise HTTPException(status_code=404, detail="File not found")
     
     return {"status": "success", "deleted_id": file_id}
+
+
+@app.post("/signup")
+async def signup(user: UserCreate):
+    return await register_user_controller(user)
+
+@app.post("/login")
+async def login(credentials: UserLogin):
+    return await login_user_controller(credentials)
