@@ -58,7 +58,7 @@ function Signup() {
       setFormData({ name: "", email: "", password: "" });
 
       const { sub: userId } = JSON.parse(atob(data.token.split(".")[1]));
-      navigate(`/${userId}/schedule`);
+      navigate(`/dashboard`);
 
     } catch (err) {
       setErrorMessage(err.message);
@@ -77,8 +77,8 @@ function Signup() {
       }}
     >
       <Container maxWidth="xs" sx={{ textAlign: "center" }}>
-        <Avatar sx={{ bgcolor: "green", margin: "0 auto" }} />
-        <Typography variant="h4" sx={{ mt: 1, color: "green" }}>
+        <Avatar sx={{ bgcolor: "primary", margin: "0 auto" }} />
+        <Typography variant="h4" sx={{ mt: 1, color: "primary" }}>
           Welcome
         </Typography>
 
@@ -134,7 +134,7 @@ function Signup() {
           )}
 
           {successMessage && (
-            <Typography color="green" sx={{ mt: 1 }}>
+            <Typography color="primary" sx={{ mt: 1 }}>
               {successMessage}
             </Typography>
           )}
@@ -143,26 +143,29 @@ function Signup() {
             type="submit"
             variant="contained"
             fullWidth
-            sx={{ mt: 2, bgcolor: "green" }}
+            sx={{ mt: 2, bgcolor: "primary" }}
             disabled={loading}
           >
             {loading ? <CircularProgress size={24} /> : "Sign Up"}
           </Button>
         </Box>
-
-        <Link
-          href="/login"
-          sx={{
-            display: "flex",
-            justifyContent: "center",
-            alignItems: "center",
-            mt: 2,
-            color: "green",
-            fontWeight: 500
-          }}
-        >
-          <ArrowBack sx={{ mr: 0.5 }} /> Back to Login
-        </Link>
+        <Typography variant="body2">
+          <Link
+            href="/login"
+            underline="hover"
+            sx={{
+              display: "flex",
+              justifyContent: "center",
+              alignItems: "center",
+              mt: 2,
+              color: "primary",
+              fontWeight: 500,
+              fontFamily: "inherit"
+            }}
+          >
+            <ArrowBack sx={{ mr: 0.5 }} /> Back to Login
+          </Link>
+        </Typography>
       </Container>
     </Box>
   );

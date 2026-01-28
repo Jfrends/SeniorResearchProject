@@ -15,7 +15,7 @@ export default function Footer() {
       }}
     >
       <Typography variant="body2" color="text.secondary">
-        © {new Date().getFullYear()} MyApp — All rights reserved.
+        {new Date().getFullYear()} FileSearcher
       </Typography>
     </Box>
   );

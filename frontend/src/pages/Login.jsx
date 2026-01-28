@@ -21,10 +21,7 @@ function Login() {
   const { login } = useContext(AuthContext);
 
   const [showPassword, setShowPassword] = useState(false);
-  const [formData, setFormData] = useState({
-    email: "",
-    password: ""
-  });
+  const [formData, setFormData] = useState({ email: "", password: "" });
   const [loading, setLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
   const [successMessage, setSuccessMessage] = useState("");
@@ -42,15 +39,13 @@ function Login() {
     setErrorMessage("");
     setSuccessMessage("");
 
-    const formattedData = { ...formData };
-
     try {
       const response = await fetch(
         `${import.meta.env.VITE_API_BASE_URL}/login`,
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(formattedData)
+          body: JSON.stringify(formData)
         }
       );
 
@@ -62,15 +57,11 @@ function Login() {
       const data = await response.json();
       login(data.token);
       setSuccessMessage("User logged in successfully!");
-
-      // Clear form
       setFormData({ email: "", password: "" });
 
-      // decode JWT payload for user id
-      const { sub: userId } = JSON.parse(atob(data.token.split(".")[1]));
       navigate("/dashboard");
     } catch (error) {
-      setErrorMessage(error.message || "An error occurred during log in.");
+      setErrorMessage(error.message || "An error occurred during login.");
     } finally {
       setLoading(false);
     }
@@ -89,8 +80,8 @@ function Login() {
     >
       <Paper elevation={3} sx={{ p: 4, width: 380, textAlign: "center" }}>
         <Stack spacing={2} alignItems="center">
-          <Avatar sx={{ bgcolor: "success.main" }} />
-          <Typography variant="h5" color="success.main">
+          <Avatar sx={{ bgcolor: "primary.main" }} />
+          <Typography variant="h5" color="primary.main">
             Welcome
           </Typography>
         </Stack>
@@ -131,7 +122,7 @@ function Login() {
             )}
 
             {successMessage && (
-              <Typography color="success.main" variant="body2" textAlign="center">
+              <Typography color="primary.main" variant="body2" textAlign="center">
                 {successMessage}
               </Typography>
             )}
@@ -139,7 +130,7 @@ function Login() {
             <Button
               type="submit"
               variant="contained"
-              sx={{ bgcolor: "success.main" }}
+              sx={{ bgcolor: "primary.main", "&:hover": { bgcolor: "primary.dark" } }}
               disabled={loading}
               fullWidth
             >
@@ -151,7 +142,7 @@ function Login() {
         <Box mt={2}>
           <Typography variant="body2">
             New to us?{" "}
-            <Link href="/signup" underline="hover" color="success.main">
+            <Link href="/signup" underline="hover" color="primary.main">
               Sign Up
             </Link>
           </Typography>
