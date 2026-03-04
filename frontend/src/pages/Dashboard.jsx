@@ -1,4 +1,5 @@
 import React, { useContext } from "react";
+import { useNavigate } from "react-router-dom";
 import { AuthContext } from "../contexts/AuthContext";
 import { Box, Typography, Button, Paper, Stack } from "@mui/material";
 import Header from "../components/Header"
@@ -6,6 +7,8 @@ import Footer from "../components/Footer"
 
 export default function Dashboard() {
   const { userId, logout } = useContext(AuthContext);
+  const navigate = useNavigate();
+
 
   return (
     <Box sx={{ width: "100vw", height: "100vh", display: "flex", flexDirection: "column" }}>
@@ -34,7 +37,7 @@ export default function Dashboard() {
           </Typography>
 
           <Stack spacing={2}>
-            <Button variant="contained" color="primary" fullWidth>
+            <Button variant="contained" color="primary" fullWidth onClick={() => navigate("/files")}>
               Go to My Files
             </Button>
 

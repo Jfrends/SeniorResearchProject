@@ -5,6 +5,7 @@ import Login from "./pages/Login";
 import Signup from "./pages/Signup";
 import Dashboard from "./pages/Dashboard";
 import { AuthContext } from "./contexts/AuthContext";
+import Files from "./pages/Files";
 
 function ProtectedRoute({ children }) {
   const { token } = useContext(AuthContext);
@@ -19,8 +20,14 @@ export default function App() {
       <Route path="/" element={<Navigate to="/login" replace />} />
       <Route path="/login" element={<Login />} />
       <Route path="/signup" element={<Signup />} />
-
-      {/* Protected user area */}
+      <Route 
+        path="/files" 
+        element={
+          <ProtectedRoute>
+            <Files />
+          </ProtectedRoute>
+        } 
+      />
       <Route
         path="/dashboard"
         element={

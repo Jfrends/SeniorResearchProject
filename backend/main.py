@@ -1,21 +1,56 @@
-from fastapi import FastAPI, HTTPException, UploadFile, File
+from fastapi import FastAPI, HTTPException, UploadFile, File, Form, Depends
 from datetime import datetime, timezone
 from bson import ObjectId
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import PlainTextResponse
+from fastapi.encoders import jsonable_encoder
+from contextlib import asynccontextmanager
+from elasticsearch import AsyncElasticsearch
+from pdfminer.high_level import extract_text
+from io import BytesIO
+
 from .database import users_collection, files_collection
 from .models import UserCreate, UserLogin, FolderCreate
-from .auth import (
-    register_user_controller,
-    login_user_controller,
-    authenticate_user,
+from .auth import register_user_controller, login_user_controller, get_current_user
+
+# ---------------- Elasticsearch ----------------
+
+es = AsyncElasticsearch(
+    hosts=[{"host": "localhost", "port": 9200, "scheme": "http"}],
 )
 
-app = FastAPI()
-port = 8000
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    if not await es.ping():
+        raise RuntimeError("Elasticsearch not reachable at http://localhost:9200")
 
-origins = [
-    "http://localhost:5173",  # Vite dev server
-]
+    exists = await es.indices.exists(index="file_texts")
+    if not exists:
+        await es.indices.create(
+            index="file_texts",
+            mappings={
+                "properties": {
+                    "file_id": {"type": "keyword"},
+                    "owner_id": {"type": "keyword"},
+                    "filename": {"type": "keyword"},
+                    "folder_path": {"type": "keyword"},
+                    "text": {"type": "text"},
+                    "upload_timestamp": {"type": "date"}
+                }
+            }
+        )
+        print("Index 'file_texts' created!")
+    else:
+        print("Index 'file_texts' already exists")
+
+    yield
+    await es.close()
+
+app = FastAPI(lifespan=lifespan)
+
+# ---------------- CORS ----------------
+
+origins = ["http://localhost:5173"]
 
 app.add_middleware(
     CORSMiddleware,
@@ -25,9 +60,40 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# ---------------- Text Extraction ----------------
+
+async def extract_text_from_upload(upload_file: UploadFile) -> str:
+    content = await upload_file.read()
+    name = upload_file.filename.lower()
+
+    if name.endswith(".txt"):
+        return content.decode("utf-8", errors="ignore")
+
+    if name.endswith(".pdf"):
+        return extract_text(BytesIO(content))
+
+    return ""
+
+# ---------------- Helpers ----------------
+
+def serialize_file(file):
+    return {
+        "id": str(file["_id"]),
+        "filename": file.get("filename"),
+        "content_type": file.get("content_type"),
+        "owner_id": str(file.get("owner_id")),
+        "folder_path": file.get("folder_path"),
+        "upload_timestamp": file.get("upload_timestamp"),
+        "is_folder": file.get("is_folder", False),
+    }
+
+# ---------------- Root ----------------
+
 @app.get("/")
 def root():
-    return {"Hello" : "World"}
+    return {"Hello": "World"}
+
+# ---------------- Users ----------------
 
 @app.get("/users")
 async def list_users():
@@ -37,28 +103,8 @@ async def list_users():
             "id": str(user["_id"]),
             "email": user.get("email"),
             "username": user.get("username"),
-            "password": user.get("password")
         })
-    return users
-
-@app.post("/users")
-async def create_user(user: UserCreate):
-    existing = await users_collection.find_one({"username": user.username})
-    if existing:
-        raise HTTPException(status_code=400, detail="Username already exists")
-    existing = await users_collection.find_one({"email": user.email})
-    if existing:
-        raise HTTPException(status_code=400, detail="Email already in use")
-    
-    # NEED TO HASH PASSWORD ETC FOR AUTH
-
-    result = await users_collection.insert_one({
-        "email": user.email,
-        "username": user.username,
-        "password": user.password
-    })
-    
-    return {"id": str(result.inserted_id), "username": user.username}
+    return jsonable_encoder(users)
 
 @app.delete("/users/{user_id}")
 async def delete_user(user_id: str):
@@ -68,75 +114,94 @@ async def delete_user(user_id: str):
         raise HTTPException(status_code=400, detail="Invalid user ID")
 
     result = await users_collection.delete_one({"_id": obj_id})
-    
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="User not found")
-    
     return {"status": "success", "deleted_id": user_id}
+
+# ---------------- Files ----------------
 
 @app.get("/files")
 async def list_files():
     files = []
     async for file in files_collection.find({}):
-        files.append({
-            "id": str(file["_id"]),
-            "filename": file.get("filename"),
-            "content_type": file.get("content_type"),
-            "owner_id": file.get("owner_id"),
-            "folder_path": file.get("folder_path"),
-            "minio_key": file.get("minio_key"),
-            "upload_timestamp": file.get("upload_timestamp")
-        })
-    return files
+        files.append(serialize_file(file))
+    return jsonable_encoder(files)
 
 @app.post("/users/{user_id}/files")
-async def user_upload_file(user_id : str, path: str, file : UploadFile = File(...)):
+async def user_upload_file(user_id: str, path: str = Form(...), file: UploadFile = File(...)):
     try:
         owner_id = ObjectId(user_id)
     except Exception:
         raise HTTPException(status_code=400, detail="Invalid user ID")
-    
-    existing = await users_collection.find_one({"_id": owner_id})
-    if not existing:
-        raise HTTPException(status_code=404, detail="User not found")
-    
-    existing = await files_collection.find_one({"folder_path": path,
-                                                "filename": file.filename,
-                                                "owner_id": owner_id})
-    if existing:
-        raise HTTPException(status_code=400, detail="File has duplicate path")
-    
-    # ADD MINIO LOGIC 
 
-    minio_key = "placeholder"
+    existing_user = await users_collection.find_one({"_id": owner_id})
+    if not existing_user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    extracted_text = await extract_text_from_upload(file)
 
     result = await files_collection.insert_one({
         "filename": file.filename,
         "content_type": file.content_type,
         "owner_id": owner_id,
         "folder_path": path,
-        "minio_key": minio_key,
         "is_folder": False,
-        "upload_timestamp": datetime.now(timezone.utc).isoformat()
+        "upload_timestamp": datetime.now(timezone.utc)
     })
 
-    return {"id": str(result.inserted_id), "filename": file.filename}
+    file_id = result.inserted_id
+
+    await es.index(
+        index="file_texts",
+        id=str(file_id),
+        document={
+            "file_id": str(file_id),
+            "owner_id": str(owner_id),
+            "filename": file.filename,
+            "folder_path": path,
+            "text": extracted_text,
+            "upload_timestamp": datetime.now(timezone.utc)
+        }
+    )
+
+    return serialize_file(await files_collection.find_one({"_id": file_id}))
+
+@app.get("/files/{file_id}/text", response_class=PlainTextResponse)
+async def get_file_text(
+    file_id: str, 
+    current_user_id: str = Depends(get_current_user)  # <--- enforce auth
+):
+    try:
+        result = await es.get(index="file_texts", id=file_id)
+        file_owner_id = result["_source"]["owner_id"]
+        if file_owner_id != current_user_id:
+            raise HTTPException(status_code=403, detail="Forbidden")
+        text = result["_source"]["text"]
+    except Exception:
+        raise HTTPException(status_code=404, detail="Text not found")
+
+    return text
+
+
+# ---------------- Folders ----------------
 
 @app.post("/users/{user_id}/folders")
-async def user_create_folder(user_id : str, folder: FolderCreate):
+async def user_create_folder(user_id: str, folder: FolderCreate):
     try:
         owner_id = ObjectId(user_id)
     except Exception:
         raise HTTPException(status_code=400, detail="Invalid user ID")
-    
-    existing = await users_collection.find_one({"_id": owner_id})
-    if not existing:
+
+    existing_user = await users_collection.find_one({"_id": owner_id})
+    if not existing_user:
         raise HTTPException(status_code=404, detail="User not found")
-    
-    existing = await files_collection.find_one({"folder_path": folder.path, 
-                                                "filename": folder.filename,
-                                                "owner_id": owner_id})
-    if existing:
+
+    existing_folder = await files_collection.find_one({
+        "folder_path": folder.path,
+        "filename": folder.filename,
+        "owner_id": owner_id
+    })
+    if existing_folder:
         raise HTTPException(status_code=400, detail="Folder has duplicate path")
 
     result = await files_collection.insert_one({
@@ -144,49 +209,48 @@ async def user_create_folder(user_id : str, folder: FolderCreate):
         "owner_id": owner_id,
         "folder_path": folder.path,
         "is_folder": True,
-        "upload_timestamp": datetime.now(timezone.utc).isoformat()
+        "upload_timestamp": datetime.now(timezone.utc)
     })
 
-    return {"id": str(result.inserted_id), "filename": folder.filename}
+    return serialize_file(await files_collection.find_one({"_id": result.inserted_id}))
 
 @app.delete("/files/{file_id}")
-async def delete_file(file_id : str):
+async def delete_file(file_id: str):
     try:
         f_id = ObjectId(file_id)
     except Exception:
         raise HTTPException(status_code=400, detail="Invalid file ID")
-    
-    # ADD MINIO CLEANUP 
+
+    await es.delete(index="file_texts", id=file_id, ignore=[404])
 
     result = await files_collection.delete_one({"_id": f_id})
-    
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="File not found")
-    
     return {"status": "success", "deleted_id": file_id}
 
-@app.delete("/folders/{file_id}")
-async def delete_folder(file_id : str):
+@app.delete("/folders/{folder_id}")
+async def delete_folder(folder_id: str):
     try:
-        folder_id = ObjectId(file_id)
+        f_id = ObjectId(folder_id)
     except Exception:
-        raise HTTPException(status_code=400, detail="Invalid file ID")
-    
-    existing = await files_collection.find_one({"_id": folder_id})
-    if not existing:
+        raise HTTPException(status_code=400, detail="Invalid folder ID")
+
+    folder = await files_collection.find_one({"_id": f_id})
+    if not folder:
         raise HTTPException(status_code=404, detail="Folder not found")
-    else:
-        files_inside = await files_collection.find_one({"folder_path": existing["folder_path"] + f"/{existing['filename']}/"})
-        if files_inside:
-            raise HTTPException(status_code=400, detail="Folder not empty")
 
-    result = await files_collection.delete_one({"_id": folder_id})
-    
+    files_inside = await files_collection.find_one({
+        "folder_path": folder["folder_path"] + f"{folder['filename']}/"
+    })
+    if files_inside:
+        raise HTTPException(status_code=400, detail="Folder not empty")
+
+    result = await files_collection.delete_one({"_id": f_id})
     if result.deleted_count == 0:
-        raise HTTPException(status_code=404, detail="File not found")
-    
-    return {"status": "success", "deleted_id": file_id}
+        raise HTTPException(status_code=404, detail="Folder not deleted")
+    return {"status": "success", "deleted_id": folder_id}
 
+# ---------------- Auth ----------------
 
 @app.post("/signup")
 async def signup(user: UserCreate):
@@ -195,3 +259,46 @@ async def signup(user: UserCreate):
 @app.post("/login")
 async def login(credentials: UserLogin):
     return await login_user_controller(credentials)
+
+# ---------------- Search ----------------
+
+@app.get("/search")
+async def search_files(query: str, current_path: str, owner_id: str):
+    if not current_path.endswith("/"):
+        current_path += "/"
+
+    resp = await es.search(
+        index="file_texts",
+        query={
+            "bool": {
+                "must": [
+                    {
+                        "match": {
+                            "text": query
+                        }
+                    }
+                ],
+                "filter": [
+                    {
+                        "prefix": {
+                            "folder_path": current_path
+                        }
+                    },
+                    {
+                        "term": {
+                            "owner_id": owner_id
+                        }
+                    }
+                ]
+            }
+        }
+    )
+
+    return [
+        {
+            "file_id": hit["_source"]["file_id"],
+            "filename": hit["_source"]["filename"],
+            "folder_path": hit["_source"]["folder_path"]
+        }
+        for hit in resp["hits"]["hits"]
+    ]

@@ -1,14 +1,12 @@
 from datetime import datetime, timedelta
-from typing import Optional
 from fastapi import Depends, HTTPException, status
-from fastapi.security import OAuth2PasswordBearer
+from fastapi.security import OAuth2PasswordBearer, HTTPBearer, HTTPAuthorizationCredentials
 from passlib.context import CryptContext
 from jose import jwt, JWTError
 from .database import users_collection
 from .models import UserCreate, UserLogin
-from bson import ObjectId
 import os
-import asyncio
+from jose import jwt, JWTError
 
 SECRET_KEY = os.getenv("TOKEN_SECRET", "dev_secret")
 ALGORITHM = "HS256"
@@ -16,6 +14,22 @@ ACCESS_TOKEN_EXPIRE_DAYS = 1
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/login")
+
+security = HTTPBearer()
+JWT_SECRET = os.getenv("JWT_SECRET", "dev_secret")
+
+def get_current_user(
+    credentials: HTTPAuthorizationCredentials = Depends(security),
+):
+    token = credentials.credentials
+    try:
+        payload = jwt.decode(token, JWT_SECRET, algorithms=["HS256"])
+        return payload["sub"]  # user_id
+    except JWTError:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or expired token",
+        )
 
 def hash_password(password: str) -> str:
     return pwd_context.hash(password)

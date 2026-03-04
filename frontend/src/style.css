@@ -5,3 +5,30 @@ html, body {
   margin: 0;
   padding: 0;
 }
+
+.preview-wrapper {
+    height: 70vh;          /* fixed viewing window */
+    border: 1px solid #ccc;
+    border-radius: 8px;
+    overflow: hidden;      /* prevents page stretching */
+    background: #111;
+}
+
+.file-preview {
+    height: 100%;
+    overflow-y: auto;      /* ← makes it scrollable */
+    padding: 16px;
+    white-space: pre-wrap; /* keeps formatting */
+    font-family: monospace;
+}
+
+.file-panel {
+  height: 70vh;           /* fixed height for the panel */
+  overflow-y: auto;       /* scrolls independently */
+  padding: 16px;
+  white-space: pre-wrap;
+  font-family: monospace;
+  background-color: #fafafa;
+  border-radius: 8px;
+  border: 1px solid #ccc;
+}
