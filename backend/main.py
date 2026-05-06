@@ -8,6 +8,10 @@ from contextlib import asynccontextmanager
 from elasticsearch import AsyncElasticsearch
 from pdfminer.high_level import extract_text
 from io import BytesIO
+from sentence_transformers import SentenceTransformer
+import numpy as np
+
+model = SentenceTransformer('all-MiniLM-L6-v2')
 
 from .database import users_collection, files_collection
 from .models import UserCreate, UserLogin, FolderCreate
@@ -35,6 +39,10 @@ async def lifespan(app: FastAPI):
                     "filename": {"type": "keyword"},
                     "folder_path": {"type": "keyword"},
                     "text": {"type": "text"},
+                    "embedding": {
+                        "type": "dense_vector",
+                        "dims": 384  # MiniLM-L6-v2 output size
+                    },
                     "upload_timestamp": {"type": "date"}
                 }
             }
@@ -139,6 +147,7 @@ async def user_upload_file(user_id: str, path: str = Form(...), file: UploadFile
         raise HTTPException(status_code=404, detail="User not found")
 
     extracted_text = await extract_text_from_upload(file)
+    embedding = get_embedding(extracted_text)
 
     result = await files_collection.insert_one({
         "filename": file.filename,
@@ -160,6 +169,7 @@ async def user_upload_file(user_id: str, path: str = Form(...), file: UploadFile
             "filename": file.filename,
             "folder_path": path,
             "text": extracted_text,
+            "embedding": embedding,  # 👈 NEW
             "upload_timestamp": datetime.now(timezone.utc)
         }
     )
@@ -262,34 +272,37 @@ async def login(credentials: UserLogin):
 
 # ---------------- Search ----------------
 
-@app.get("/search")
-async def search_files(query: str, current_path: str, owner_id: str):
+def get_embedding(text: str):
+    return model.encode(text).tolist()  # convert to list for ES
+
+@app.get("/semantic-search")
+async def semantic_search(query: str, current_path: str, owner_id: str):
     if not current_path.endswith("/"):
         current_path += "/"
 
+    query_embedding = get_embedding(query)
+
     resp = await es.search(
         index="file_texts",
+        size=20,
         query={
-            "bool": {
-                "must": [
-                    {
-                        "match": {
-                            "text": query
-                        }
+            "script_score": {
+                "query": {
+                    "bool": {
+                        "filter": [
+                            {"prefix": {"folder_path": current_path}},
+                            {"term": {"owner_id": owner_id}}
+                        ]
                     }
-                ],
-                "filter": [
-                    {
-                        "prefix": {
-                            "folder_path": current_path
-                        }
-                    },
-                    {
-                        "term": {
-                            "owner_id": owner_id
-                        }
+                },
+                "script": {
+                    "source": """
+                        cosineSimilarity(params.query_vector, 'embedding') + 1.0
+                    """,
+                    "params": {
+                        "query_vector": query_embedding
                     }
-                ]
+                }
             }
         }
     )
@@ -298,7 +311,23 @@ async def search_files(query: str, current_path: str, owner_id: str):
         {
             "file_id": hit["_source"]["file_id"],
             "filename": hit["_source"]["filename"],
-            "folder_path": hit["_source"]["folder_path"]
+            "folder_path": hit["_source"]["folder_path"],
+            "score": hit["_score"]
         }
         for hit in resp["hits"]["hits"]
+        if hit["_score"] > 1.2
     ]
+
+# ---------------- LLM ----------------
+
+def chunk_text(text: str, chunk_size: int = 500, overlap: int = 100):
+    words = text.split()
+    chunks = []
+
+    i = 0
+    while i < len(words):
+        chunk = words[i:i + chunk_size]
+        chunks.append(" ".join(chunk))
+        i += chunk_size - overlap
+
+    return chunks

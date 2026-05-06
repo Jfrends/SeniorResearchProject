@@ -94,7 +94,7 @@ export default function MyFiles() {
 
     try {
       const res = await fetch(
-        `${import.meta.env.VITE_API_BASE_URL}/search?query=${encodeURIComponent(searchQuery)}&current_path=${encodeURIComponent(currentPath)}&owner_id=${userId}`,
+        `${import.meta.env.VITE_API_BASE_URL}/semantic-search?query=${encodeURIComponent(searchQuery)}&current_path=${encodeURIComponent(currentPath)}&owner_id=${userId}`,
         { headers: { Authorization: `Bearer ${token}` } }
       );
 
