@@ -1,0 +1,27 @@
+# FastAPI core
+fastapi
+uvicorn[standard]
+
+# Database
+motor
+pymongo
+elasticsearch[async]
+
+# Authentication / security (based on typical FastAPI setups in your imports)
+python-jose[cryptography]
+passlib[bcrypt]
+
+# File handling
+python-multipart
+pdfminer.six
+
+# ML / embeddings
+sentence-transformers
+torch
+
+# HTTP client (for Ollama LLM calls)
+httpx
+
+# Utilities
+pydantic
+bson
