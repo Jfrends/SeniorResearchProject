@@ -19,8 +19,8 @@ Before starting, install:
 # Clone the Project
 
 ```bash
-git clone <your-repo-url>
-cd <your-project-folder>
+git clone https://github.com/Jfrends/SeniorResearchProject
+cd SeniorResearchProject
 ```
 
 ---
