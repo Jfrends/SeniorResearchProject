@@ -1,284 +1,158 @@
 # File Search System
 
 ## Overview
-This project is a full-stack document management and AI-powered file search system. It allows users to upload files, organize them into folders, search semantically across content, and ask natural language questions over their documents using a local LLM.
+This is a full-stack document management and AI search system that allows users to upload files, organize them into folders, search semantically, and ask natural language questions over their documents.
 
-The system is composed of:
+It is built with:
 - **Frontend:** React + Material UI
-- **Backend:** FastAPI + MongoDB + Elasticsearch + SentenceTransformers + Ollama
+- **Backend:** FastAPI + MongoDB + Elasticsearch + SentenceTransformers + Ollama (phi3)
 
 ---
 
 # Backend
 
 ## Overview
-The backend is built using **FastAPI** and integrates **MongoDB** for metadata storage and **Elasticsearch** for semantic search over document embeddings.
-
-It supports:
-- Authentication
-- File/folder management
-- Document ingestion pipeline
-- Semantic search
-- Retrieval-augmented generation (RAG) with a local LLM
+The backend provides APIs for file management, semantic search, and LLM-based question answering over user documents.
 
 ---
 
-## FastAPI
-
-### Core Responsibilities
-FastAPI serves as the main API layer and handles:
+## Core FastAPI Responsibilities
 - User authentication (signup/login/delete)
-- File and folder operations
-- File upload and processing
+- File and folder management
+- File upload and text extraction
 - Semantic search over embeddings
-- LLM-powered question answering
+- AI question answering (RAG pipeline)
 
 ---
 
-### File Upload Pipeline
-When a file is uploaded:
-1. Text is extracted (`pdfminer` or UTF-8 decoding)
-2. Text is split into overlapping chunks
-3. Each chunk is embedded using `all-MiniLM-L6-v2`
-4. Chunks are stored in Elasticsearch with metadata
+## File Processing Pipeline
+1. Extract text from uploaded `.txt` or `.pdf`
+2. Chunk text with overlap
+3. Generate embeddings using `all-MiniLM-L6-v2`
+4. Store metadata in MongoDB
+5. Store chunks + embeddings in Elasticsearch
 
 ---
 
-### Semantic Search
+## Semantic Search
 - Endpoint: `/semantic-search`
-- Uses cosine similarity over embeddings via Elasticsearch `script_score`
-- Filters by:
-  - `owner_id`
-  - `folder_path`
-- Returns ranked files with representative text snippets
+- Uses cosine similarity over embeddings
+- Filters by user and folder path
+- Returns ranked file snippets
 
 ---
 
-### Question Answering (/ask)
-- Retrieves top matching document chunks from Elasticsearch
-- Builds a context window
-- Sends prompt to local LLM (Ollama `phi3`)
-- Enforces strict grounding (answers only from provided context)
+## AI Question Answering (/ask)
+- Retrieves relevant chunks from Elasticsearch
+- Builds context window
+- Sends to local LLM (Ollama phi3)
 - Returns:
   - AI-generated answer
-  - Source file references
+  - Source files
 
 ---
 
-### File & Folder Management
-- `POST /users/{user_id}/files` → upload file
-- `GET /files` → list files
-- `DELETE /files/{file_id}` → delete file + embeddings
-- `POST /users/{user_id}/folders` → create folder
-- `DELETE /folders/{folder_id}` → delete folder (with safety checks)
-- `GET /files/{file_id}/text` → retrieve raw file text
-
----
-
-### User Management
-- `POST /signup`
-- `POST /login`
-- `GET /users`
-- `DELETE /users/{user_id}`
-
----
-
-## Data Storage
+## Storage
 
 ### MongoDB
-Stores:
 - Users
-- File metadata
-- Folder structure
+- File and folder metadata
 
 ### Elasticsearch
-Stores:
-- Document chunks
-- Embeddings (384-dim vectors)
-- Metadata for filtering and search
+- Text chunks
+- Vector embeddings (384-dim)
+- Search + filtering support
 
 ---
 
-## Machine Learning Components
-
-### Embedding Model
-- `all-MiniLM-L6-v2` (SentenceTransformers)
-- Converts text into vector embeddings for semantic search
-
-### LLM (Ollama)
-- Model: `phi3`
-- Runs locally via `http://localhost:11434/api/generate`
-- Used for retrieval-augmented question answering
+## API Summary
+- `POST /signup`, `POST /login`
+- `GET /files`, `DELETE /files/{id}`
+- `POST /users/{id}/files`
+- `POST /users/{id}/folders`
+- `DELETE /folders/{id}`
+- `GET /files/{id}/text`
+- `GET /semantic-search`
+- `POST /ask`
 
 ---
 
-## System Flow (Backend)
-1. File uploaded
-2. Text extracted and chunked
-3. Embeddings generated
-4. Stored in MongoDB + Elasticsearch
-5. Query arrives
-6. Elasticsearch retrieves relevant chunks
-7. LLM generates grounded response
+## ML Components
+- **Embeddings:** SentenceTransformers `all-MiniLM-L6-v2`
+- **LLM:** Ollama `phi3` for contextual QA
 
 ---
 
 # Frontend
 
 ## Overview
-The frontend is built with **React** and **Material UI (MUI)**. It provides a file explorer interface with integrated semantic search and AI-powered document Q&A.
-
-It connects to the backend to:
-- Manage files and folders
-- Upload and preview documents
-- Perform semantic search
-- Ask questions using AI
+The frontend is a React + MUI interface for browsing files, searching content, and interacting with an AI assistant.
 
 ---
 
-## Core Responsibilities
-The frontend handles:
-- File and folder navigation UI
-- File uploads and deletions
-- Folder creation and navigation
-- Semantic search interface
-- AI question answering interface
-- File preview rendering
-
----
-
-## Authentication
-- Uses `AuthContext` for:
-  - JWT token
-  - User ID
-- Redirects unauthenticated users to `/login`
+## Core Features
+- File and folder navigation
+- File upload and deletion
+- File preview
+- Semantic search
+- AI question answering (RAG interface)
 
 ---
 
 ## File Explorer
-
-### File Listing
-- Fetches files from `GET /files`
-- Filters by current folder path (`currentPath`)
-- Displays:
-  - Files (document icon)
-  - Folders (folder icon)
-
----
-
-### Folder Navigation
-- Supports hierarchical navigation using `currentPath`
-- Features:
-  - Enter folder
-  - Back navigation
-  - Path display
-
----
-
-### File Upload
-- Uses `POST /users/{userId}/files`
-- Sends:
-  - File (FormData)
-  - Current folder path
-- Displays upload progress state
-
----
-
-### File Deletion
-- Files: `DELETE /files/{fileId}`
-- Folders: `DELETE /folders/{folderId}`
-- Includes confirmation prompt before deletion
+- Displays files and folders based on current path
+- Supports folder navigation (enter/back)
+- Uploads files via API
+- Deletes files and folders with confirmation
 
 ---
 
 ## File Preview
-- Clicking a file fetches:
-  - `GET /files/{fileId}/text`
-- Displays extracted document content
-- Shows loading state while fetching
+- Loads file text via `/files/{id}/text`
+- Displays extracted document content in a preview panel
 
 ---
 
-## Folder Management
-- Folder creation via modal UI
-- Calls:
-  - `POST /users/{userId}/folders`
-- Prevents duplicates (backend enforced)
-
----
-
-## Search & AI Features
+## Search & AI
 
 ### Semantic Search
-- Endpoint: `GET /semantic-search`
-- Parameters:
-  - query
-  - current_path
-  - owner_id
-- Displays ranked results based on semantic similarity
+- Queries `/semantic-search`
+- Returns ranked document matches
 
----
-
-### Ask AI (RAG System)
-- Endpoint: `POST /ask`
-- Sends:
-  - query
-  - current_path
-  - owner_id
-
-#### Response
-- AI-generated answer
-- Source file references
+### Ask AI
+- Calls `/ask`
+- Displays:
+  - AI-generated answer
+  - Source files used
 
 ---
 
 ## UI Layout
-
-### Left Panel
-- File/folder list
-- Search results
-- Loading indicators
-
-### Right Panel
-Displays:
-- File preview OR
-- AI answer with sources OR
-- Empty state message
+- **Left panel:** file/folder list + search results
+- **Right panel:** file preview OR AI response
 
 ---
 
 ## State Management
-Key React state variables:
-- `files` → file list
-- `currentPath` → active folder
-- `selectedItem` → selected file/folder
-- `fileText` → file preview content
-- `searchQuery` → input text
-- `searchResults` → semantic results
-- `askAnswer` → AI response
-- `askSources` → cited files
-- loading states for async operations
+Key state includes:
+- Files + folders
+- Current path
+- Selected file
+- Search query + results
+- AI answer + sources
+- Loading states
 
 ---
 
-## System Flow (Frontend)
-1. User logs in
-2. Files are fetched for current folder
-3. User can:
-   - Navigate folders
-   - Upload files
-   - Search semantically
-   - Ask AI questions
-4. UI dynamically switches between:
-   - File browsing
-   - Search results
-   - AI response view
+## System Flow
+1. User uploads and organizes files
+2. Backend extracts and embeds content
+3. User searches or asks questions
+4. Backend retrieves relevant context
+5. LLM generates grounded responses
+6. Frontend displays results or file previews
 
 ---
 
 ## Summary
-This system combines a structured file management UI with a powerful backend search and LLM pipeline. Together, they enable:
-- Organized document storage
-- Semantic search over content
-- AI-assisted document understanding
-- A smooth, interactive file explorer experience
+This system combines structured file storage with semantic search and LLM-based Q&A, creating an interactive document assistant with both browsing and intelligent retrieval capabilities.
