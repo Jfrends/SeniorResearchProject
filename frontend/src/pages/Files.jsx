@@ -28,31 +28,31 @@ export default function MyFiles() {
   const [files, setFiles] = useState([]);
   const [loading, setLoading] = useState(true);
 
-  // Folder modal
   const [openFolderModal, setOpenFolderModal] = useState(false);
   const [folderName, setFolderName] = useState("");
 
-  // File upload
   const [selectedFile, setSelectedFile] = useState(null);
   const [uploading, setUploading] = useState(false);
 
-  // Navigation
   const [currentPath, setCurrentPath] = useState("/");
 
-  // Viewer
   const [selectedItem, setSelectedItem] = useState(null);
   const [fileText, setFileText] = useState("");
   const [textLoading, setTextLoading] = useState(false);
 
-  // 🔍 Search
+  // ---------------- SEARCH + ASK ----------------
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState([]);
   const [isSearching, setIsSearching] = useState(false);
   const [searchLoading, setSearchLoading] = useState(false);
 
+  const [askAnswer, setAskAnswer] = useState("");
+  const [askSources, setAskSources] = useState([]);
+  const [askLoading, setAskLoading] = useState(false);
+
   if (!userId) return <Navigate to="/login" replace />;
 
-  // ---------------- Fetch files ----------------
+  // ---------------- FETCH FILES ----------------
   const fetchFiles = async () => {
     setLoading(true);
     try {
@@ -78,23 +78,27 @@ export default function MyFiles() {
     setSelectedItem(null);
     setFileText("");
 
-    // reset search when navigating
     setIsSearching(false);
     setSearchResults([]);
     setSearchQuery("");
 
+    setAskAnswer("");
+    setAskSources([]);
   }, [currentPath]);
 
-  // ---------------- Search ----------------
+  // ---------------- SEARCH ----------------
   const handleSearch = async () => {
     if (!searchQuery.trim()) return;
 
     setSearchLoading(true);
     setIsSearching(true);
+    setAskAnswer("");
 
     try {
       const res = await fetch(
-        `${import.meta.env.VITE_API_BASE_URL}/semantic-search?query=${encodeURIComponent(searchQuery)}&current_path=${encodeURIComponent(currentPath)}&owner_id=${userId}`,
+        `${import.meta.env.VITE_API_BASE_URL}/semantic-search?query=${encodeURIComponent(
+          searchQuery
+        )}&current_path=${encodeURIComponent(currentPath)}&owner_id=${userId}`,
         { headers: { Authorization: `Bearer ${token}` } }
       );
 
@@ -102,6 +106,7 @@ export default function MyFiles() {
 
       const data = await res.json();
       setSearchResults(data);
+      setAskAnswer("");
     } catch (err) {
       console.error(err);
       setSearchResults([]);
@@ -110,13 +115,56 @@ export default function MyFiles() {
     }
   };
 
+  // ---------------- ASK AI ----------------
+  const handleAsk = async () => {
+    if (!searchQuery.trim()) return;
+
+    setAskLoading(true);
+    setIsSearching(true);
+    setAskAnswer("");
+    setAskSources([]);
+    setSearchResults([]);
+
+    try {
+      const res = await fetch(
+        `${import.meta.env.VITE_API_BASE_URL}/ask`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({
+            query: searchQuery,
+            current_path: currentPath,
+            owner_id: userId,
+          }),
+        }
+      );
+
+      if (!res.ok) throw new Error("Ask failed");
+
+      const data = await res.json();
+
+      setAskAnswer(data.answer);
+      setAskSources(data.sources || []);
+    } catch (err) {
+      console.error(err);
+      setAskAnswer("Error generating answer.");
+    } finally {
+      setAskLoading(false);
+    }
+  };
+
   const clearSearch = () => {
     setIsSearching(false);
     setSearchResults([]);
     setSearchQuery("");
+    setAskAnswer("");
+    setAskSources([]);
   };
 
-  // ---------------- Folder ops ----------------
+  // ---------------- FOLDER OPS ----------------
   const handleCreateFolder = async () => {
     if (!folderName.trim()) return;
 
@@ -129,7 +177,10 @@ export default function MyFiles() {
             "Content-Type": "application/json",
             Authorization: `Bearer ${token}`,
           },
-          body: JSON.stringify({ filename: folderName, path: currentPath }),
+          body: JSON.stringify({
+            filename: folderName,
+            path: currentPath,
+          }),
         }
       );
 
@@ -152,7 +203,7 @@ export default function MyFiles() {
     setCurrentPath("/" + parts.join("/") + (parts.length ? "/" : ""));
   };
 
-  // ---------------- Upload ----------------
+  // ---------------- UPLOAD ----------------
   const handleUploadFile = async () => {
     if (!selectedFile) return;
 
@@ -182,21 +233,27 @@ export default function MyFiles() {
     }
   };
 
-  // ---------------- Delete ----------------
+  // ---------------- DELETE ----------------
   const handleDelete = async (item) => {
     if (!window.confirm(`Delete "${item.filename}"?`)) return;
 
-    const endpoint = item.is_folder ? `/folders/${item.id}` : `/files/${item.id}`;
+    const endpoint = item.is_folder
+      ? `/folders/${item.id}`
+      : `/files/${item.id}`;
 
     try {
       const res = await fetch(
         `${import.meta.env.VITE_API_BASE_URL}${endpoint}`,
-        { method: "DELETE", headers: { Authorization: `Bearer ${token}` } }
+        {
+          method: "DELETE",
+          headers: { Authorization: `Bearer ${token}` },
+        }
       );
 
       if (!res.ok) throw new Error("Delete failed");
 
       fetchFiles();
+
       if (selectedItem?.id === item.id) {
         setSelectedItem(null);
         setFileText("");
@@ -206,7 +263,7 @@ export default function MyFiles() {
     }
   };
 
-  // ---------------- Preview ----------------
+  // ---------------- FILE PREVIEW ----------------
   const handleSelectFile = async (item) => {
     if (item.is_folder) return;
 
@@ -233,46 +290,74 @@ export default function MyFiles() {
     }
   };
 
-  // ---------------- Render ----------------
   const displayFiles = isSearching ? searchResults : files;
 
+  // ---------------- UI ----------------
   return (
     <Box sx={{ p: 3, display: "flex", flexDirection: "column", height: "100%" }}>
-      <Typography variant="h5" gutterBottom>My Files</Typography>
+      <Typography variant="h5" gutterBottom>
+        My Files
+      </Typography>
 
-      {/* Controls */}
+      {/* CONTROLS */}
       <Box sx={{ display: "flex", gap: 2, mb: 2, flexWrap: "wrap" }}>
-        <Button variant="contained" onClick={() => setOpenFolderModal(true)}>Create Folder</Button>
-        <Button onClick={goUp} disabled={currentPath === "/"}>Back</Button>
+        <Button variant="contained" onClick={() => setOpenFolderModal(true)}>
+          Create Folder
+        </Button>
+
+        <Button onClick={goUp} disabled={currentPath === "/"}>
+          Back
+        </Button>
 
         <Button component="label" variant="outlined" startIcon={<UploadFileIcon />}>
           Select File
-          <input hidden type="file" onChange={(e) => setSelectedFile(e.target.files[0])}/>
+          <input
+            hidden
+            type="file"
+            onChange={(e) => setSelectedFile(e.target.files[0])}
+          />
         </Button>
 
-        <Button onClick={handleUploadFile} disabled={!selectedFile || uploading} variant="contained" color="success">
+        <Button
+          onClick={handleUploadFile}
+          disabled={!selectedFile || uploading}
+          variant="contained"
+          color="success"
+        >
           {uploading ? "Uploading..." : "Upload"}
         </Button>
 
-        {/* Search */}
+        {/* SEARCH / ASK */}
         <TextField
           size="small"
-          placeholder="Search inside this folder..."
+          placeholder="Search or ask your files..."
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && handleSearch()}
         />
 
-        <Button variant="outlined" onClick={handleSearch}>Search</Button>
-        {isSearching && <Button color="secondary" onClick={clearSearch}>Clear</Button>}
+        <Button variant="outlined" onClick={handleSearch}>
+          Search
+        </Button>
+
+        <Button variant="contained" onClick={handleAsk}>
+          Ask AI
+        </Button>
+
+        {isSearching && (
+          <Button color="secondary" onClick={clearSearch}>
+            Clear
+          </Button>
+        )}
       </Box>
 
       <Typography sx={{ mb: 1 }}>Path: {currentPath}</Typography>
 
+      {/* MAIN LAYOUT */}
       <Box sx={{ display: "flex", gap: 2, height: "70vh", minHeight: 0 }}>
-        {/* Left panel */}
-        <Box sx={{ flex: 1, overflowY: "auto", minHeight: 0 }}>
-          {loading || searchLoading ? (
+        {/* LEFT */}
+        <Box sx={{ flex: 1, overflowY: "auto" }}>
+          {loading || searchLoading || askLoading ? (
             <CircularProgress />
           ) : (
             <List>
@@ -290,7 +375,10 @@ export default function MyFiles() {
                     !isSearching && (
                       <IconButton
                         edge="end"
-                        onClick={(e) => { e.stopPropagation(); handleDelete(item); }}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleDelete(item);
+                        }}
                         sx={{ color: "red" }}
                       >
                         <DeleteIcon fontSize="small" />
@@ -301,44 +389,64 @@ export default function MyFiles() {
                   <ListItemIcon>
                     {item.is_folder ? <FolderIcon /> : <InsertDriveFileIcon />}
                   </ListItemIcon>
-                  <ListItemText
-                    primary={item.filename}
-                    secondary={isSearching ? item.folder_path : null}
-                  />
+                  <ListItemText primary={item.filename} />
                 </ListItem>
               ))}
             </List>
           )}
         </Box>
 
-        {/* Right preview */}
-        <Box sx={{
-          flex: 2,
-          border: "1px solid #ccc",
-          borderRadius: 2,
-          bgcolor: "#fafafa",
-          p: 2,
-          fontFamily: "monospace",
-          whiteSpace: "pre-wrap",
-          overflowY: "auto",
-          minHeight: 0
-        }}>
-          {!selectedItem ? (
-            <Typography color="text.secondary">Select a file to preview</Typography>
+        {/* RIGHT PANEL */}
+        <Box
+          sx={{
+            flex: 2,
+            border: "1px solid #ccc",
+            borderRadius: 2,
+            p: 2,
+            bgcolor: "#fafafa",
+            overflowY: "auto",
+            fontFamily: "monospace",
+            whiteSpace: "pre-wrap",
+          }}
+        >
+          {/* ASK MODE */}
+          {askAnswer ? (
+            <>
+              <Typography variant="subtitle2" gutterBottom>
+                AI Answer
+              </Typography>
+
+              <Typography sx={{ mb: 2 }}>{askAnswer}</Typography>
+
+              {askSources.length > 0 && (
+                <>
+                  <Typography variant="subtitle2">Sources</Typography>
+                  {askSources.map((s, i) => (
+                    <Typography key={i} variant="caption" display="block">
+                      📄 {s.filename}
+                    </Typography>
+                  ))}
+                </>
+              )}
+            </>
+          ) : !selectedItem ? (
+            <Typography color="text.secondary">
+              Select a file or ask a question
+            </Typography>
           ) : textLoading ? (
             <CircularProgress />
           ) : (
             <>
-              <Typography variant="subtitle2" gutterBottom>
+              <Typography variant="subtitle2">
                 {selectedItem.filename}
               </Typography>
-              <Typography variant="body2">{fileText}</Typography>
+              <Typography>{fileText}</Typography>
             </>
           )}
         </Box>
       </Box>
 
-      {/* Folder dialog */}
+      {/* FOLDER MODAL */}
       <Dialog open={openFolderModal} onClose={() => setOpenFolderModal(false)}>
         <DialogTitle>Create Folder</DialogTitle>
         <DialogContent>
@@ -352,7 +460,9 @@ export default function MyFiles() {
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setOpenFolderModal(false)}>Cancel</Button>
-          <Button onClick={handleCreateFolder} variant="contained">Create</Button>
+          <Button onClick={handleCreateFolder} variant="contained">
+            Create
+          </Button>
         </DialogActions>
       </Dialog>
     </Box>
