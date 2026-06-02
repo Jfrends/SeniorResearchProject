@@ -54,8 +54,9 @@ docker run -d -p 27017:27017 --name mongo mongo
 docker run -d \
   -p 9200:9200 \
   -e "discovery.type=single-node" \
-  -e "ELASTIC_PASSWORD=changeme" \
-  docker.elastic.co/elasticsearch/elasticsearch:8.11.0
+  -e "xpack.security.enabled=false" \
+  -e "xpack.security.http.ssl.enabled=false" \
+  elasticsearch:8.11.0
 ```
 
 ### OR install locally
