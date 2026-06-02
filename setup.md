@@ -134,6 +134,12 @@ Create a `.env` file in the `frontend/` directory:
 VITE_API_BASE_URL=http://localhost:8000
 ```
 
+Create a `.env` file in the `backend/` directory:
+
+```env
+MONGO_URI=mongodb://localhost:27017
+```
+
 ---
 
 # System Overview
@@ -168,10 +174,6 @@ VITE_API_BASE_URL=http://localhost:8000
 
 ## Elasticsearch not starting
 - Increase Docker memory (2–4GB minimum)
-
-## Ollama errors
-- Run `ollama serve`
-- Ensure model is installed (`ollama pull phi3`)
 
 ## No search results
 - Check Elasticsearch index: `file_texts`
