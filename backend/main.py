@@ -30,7 +30,7 @@ def get_embedding(text: str):
 
 # ---------------- DB ----------------
 
-from .database import users_collection, files_collection
+from .database import client, users_collection, files_collection
 from .auth import register_user_controller, login_user_controller, get_current_user
 
 
@@ -369,7 +369,13 @@ async def ask(payload: dict, current_user_id: str = Depends(get_current_user)):
     )
 
     prompt = f"""
-Use only context.
+        You are a strict document QA system.
+
+        RULES:
+        - You may ONLY use the provided context.
+        - If the answer is not explicitly in the context, say: "I don't know based on the provided documents."
+        - Do not use outside knowledge.
+        - Do not guess.
 
 {context}
 
@@ -484,3 +490,11 @@ async def delete_folder(
     await files_collection.delete_one({"_id": oid})
 
     return {"status": "deleted", "id": folder_id}
+
+@app.get("/debug/mongo")
+async def debug_mongo():
+    return {
+        "mongo_uri": str(client.address),
+        "dbs": await client.list_database_names(),
+        "users_count": await users_collection.count_documents({})
+    }

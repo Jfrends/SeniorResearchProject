@@ -10,6 +10,7 @@ from fastapi.security import (
 
 from passlib.context import CryptContext
 from jose import jwt, JWTError
+from bson import ObjectId
 
 from .database import users_collection
 from .models import UserCreate, UserLogin
@@ -45,21 +46,25 @@ def create_access_token(data: dict) -> str:
     to_encode.update({"exp": expire})
     return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
 
-
-def get_current_user(
-    credentials: HTTPAuthorizationCredentials = Depends(security),
-):
+async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)):
     token = credentials.credentials
 
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-        return payload["sub"]  # user_id
-    except JWTError:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid or expired token",
-        )
+        user_id = payload["sub"]
 
+        user = await users_collection.find_one({"_id": ObjectId(user_id)})
+
+        if not user:
+            raise HTTPException(
+                status_code=401,
+                detail="User no longer exists"
+            )
+
+        return user_id
+
+    except JWTError:
+        raise HTTPException(status_code=401, detail="Invalid token")
 
 def authenticate_user(token: str = Depends(oauth2_scheme)):
     try:

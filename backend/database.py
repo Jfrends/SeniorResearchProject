@@ -5,8 +5,11 @@ from dotenv import load_dotenv
 load_dotenv()  # loads .env
 
 MONGO_URI = os.getenv("MONGO_URI")
+print("MONGO_URI =", MONGO_URI)
 client = AsyncIOMotorClient(MONGO_URI)
 db = client["seniorproject_db"]
+
+print("Mongo client connected to:", client.address)
 
 # Access collections
 users_collection = db["users"]
