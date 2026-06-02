@@ -71,7 +71,7 @@ docker run -d \
 
 
 ```bash
-uvicorn backend.main:app --reload
+uvicorn backend.main:app --reload --reload-dir backend
 ```
 
 Backend runs at:
