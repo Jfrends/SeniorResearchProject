@@ -14,9 +14,6 @@ from io import BytesIO
 
 from sentence_transformers import SentenceTransformer
 import httpx
-import time
-
-from pydantic import BaseModel
 
 # ---------------- Models ----------------
 
