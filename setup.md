@@ -83,28 +83,21 @@ http://localhost:8000
 
 # LLM Setup (Ollama)
 
-## 1. Install Ollama
-https://ollama.com
+## 1. Install Ollama (Docker)
+```bash
+docker run -d \
+  --name ollama \
+  -p 11434:11434 \
+  -v ollama:/root/.ollama \
+  ollama/ollama
+```
 
 ---
 
 ## 2. Pull Model
 
 ```bash
-ollama pull phi3
-```
-
----
-
-## 3. Start Ollama Server
-
-```bash
-ollama serve
-```
-
-LLM runs at:
-```
-http://localhost:11434
+docker exec -it ollama ollama pull phi3
 ```
 
 ---
