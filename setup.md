@@ -30,7 +30,6 @@ cd SeniorResearchProject
 ## 1. Create Virtual Environment
 
 ```bash
-cd backend
 python3 -m venv venv
 source venv/bin/activate   # Mac/Linux
 # venv\Scripts\activate    # Windows
@@ -52,7 +51,11 @@ pip install -r requirements.txt
 
 ```bash
 docker run -d -p 27017:27017 --name mongo mongo
-docker run -d -p 9200:9200 -e "discovery.type=single-node" elasticsearch:8.11.0
+docker run -d \
+  -p 9200:9200 \
+  -e "discovery.type=single-node" \
+  -e "ELASTIC_PASSWORD=changeme" \
+  docker.elastic.co/elasticsearch/elasticsearch:8.11.0
 ```
 
 ### OR install locally
