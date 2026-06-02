@@ -64,8 +64,11 @@ docker run -d -p 9200:9200 -e "discovery.type=single-node" elasticsearch:8.11.0
 
 ## 4. Run Backend Server
 
+
+
 ```bash
-uvicorn main:app --reload
+cd ..
+uvicorn backend.main:app --reload
 ```
 
 Backend runs at:
