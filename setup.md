@@ -70,7 +70,6 @@ docker run -d \
 
 
 ```bash
-cd ..
 uvicorn backend.main:app --reload
 ```
 
