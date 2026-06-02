@@ -14,21 +14,16 @@ from io import BytesIO
 
 from sentence_transformers import SentenceTransformer
 import httpx
-
-# ---------------- Models ----------------
+import time
 
 from pydantic import BaseModel
 
-class FolderCreate(BaseModel):
-    filename: str
-    path: str
+# ---------------- Models ----------------
 
-class SearchRequest(BaseModel):
-    query: str
-    results: list
+from .models import UserLogin, UserCreate, FolderCreate
 
 
-# ---------------- ML Model ----------------
+# ---------------- ML ----------------
 
 model = SentenceTransformer("all-MiniLM-L6-v2")
 
@@ -36,14 +31,7 @@ def get_embedding(text: str):
     return model.encode(text).tolist()
 
 
-# ---------------- External LLM ----------------
-
-OLLAMA_URL = "http://localhost:11434/api/generate"
-LLM_MODEL = "phi3"
-
-
-# ---------------- DB placeholders ----------------
-# (keep your existing Mongo collections)
+# ---------------- DB ----------------
 
 from .database import users_collection, files_collection
 from .auth import register_user_controller, login_user_controller, get_current_user
@@ -74,10 +62,7 @@ async def lifespan(app: FastAPI):
                     "filename": {"type": "keyword"},
                     "folder_path": {"type": "keyword"},
                     "text": {"type": "text"},
-                    "embedding": {
-                        "type": "dense_vector",
-                        "dims": 384
-                    },
+                    "embedding": {"type": "dense_vector", "dims": 384},
                     "upload_timestamp": {"type": "date"}
                 }
             }
@@ -106,12 +91,10 @@ app.add_middleware(
 def chunk_text(text: str, chunk_size=500, overlap=100):
     words = text.split()
     chunks = []
-
     i = 0
     while i < len(words):
         chunks.append(" ".join(words[i:i + chunk_size]))
         i += chunk_size - overlap
-
     return chunks
 
 
@@ -128,126 +111,54 @@ async def extract_text_from_upload(file: UploadFile):
     return ""
 
 
-# ---------------- Health ----------------
+# =========================================================
+# AUTH ROUTES
+# =========================================================
 
-@app.get("/")
-def root():
-    return {"status": "ok"}
-
-
-# ---------------- USERS ----------------
-
-@app.get("/users")
-async def list_users():
-    users = []
-    async for u in users_collection.find({}):
-        users.append({
-            "id": str(u["_id"]),
-            "email": u.get("email"),
-            "username": u.get("username")
-        })
-    return jsonable_encoder(users)
+@app.post("/signup")
+async def signup(user: UserCreate):
+    return await register_user_controller(user)
 
 
-@app.delete("/users/{user_id}")
-async def delete_user(user_id: str):
-    try:
-        oid = ObjectId(user_id)
-    except:
-        raise HTTPException(400, "Invalid user ID")
-
-    res = await users_collection.delete_one({"_id": oid})
-    if res.deleted_count == 0:
-        raise HTTPException(404, "User not found")
-
-    return {"status": "deleted"}
+@app.post("/login")
+async def login(user: UserLogin):
+    return await login_user_controller(user)
 
 
-# ---------------- FILES ----------------
+# =========================================================
+# FILE LIST (USER-SCOPED FIX)
+# =========================================================
 
 @app.get("/files")
-async def list_files():
+async def list_files(current_user_id: str = Depends(get_current_user)):
     files = []
-    async for f in files_collection.find({}):
+
+    async for f in files_collection.find({"owner_id": ObjectId(current_user_id)}):
         files.append({
             "id": str(f["_id"]),
             "filename": f["filename"],
             "folder_path": f["folder_path"],
             "is_folder": f.get("is_folder", False),
         })
+
     return files
 
 
-# ---------------- CREATE / DELETE FOLDER ----------------
-
-@app.post("/users/{user_id}/folders")
-async def create_folder(user_id: str, folder: FolderCreate):
-
-    owner_id = ObjectId(user_id)
-
-    user = await users_collection.find_one({"_id": owner_id})
-    if not user:
-        raise HTTPException(404, "User not found")
-
-    existing = await files_collection.find_one({
-        "owner_id": owner_id,
-        "folder_path": folder.path,
-        "filename": folder.filename,
-        "is_folder": True
-    })
-
-    if existing:
-        raise HTTPException(400, "Folder already exists")
-
-    res = await files_collection.insert_one({
-        "filename": folder.filename,
-        "owner_id": owner_id,
-        "folder_path": folder.path,
-        "is_folder": True,
-        "upload_timestamp": datetime.now(timezone.utc)
-    })
-
-    return {"id": str(res.inserted_id), "filename": folder.filename}
-
-@app.delete("/folders/{folder_id}")
-async def delete_folder(folder_id: str):
-
-    try:
-        oid = ObjectId(folder_id)
-    except:
-        raise HTTPException(status_code=400, detail="Invalid folder ID")
-
-    folder = await files_collection.find_one({"_id": oid})
-
-    if not folder:
-        raise HTTPException(status_code=404, detail="Folder not found")
-
-    if not folder.get("is_folder"):
-        raise HTTPException(status_code=400, detail="Not a folder")
-
-    # check if folder contains files
-    prefix = folder["folder_path"] + folder["filename"] + "/"
-
-    child = await files_collection.find_one({
-        "folder_path": prefix
-    })
-
-    if child:
-        raise HTTPException(status_code=400, detail="Folder not empty")
-
-    # delete folder metadata
-    await files_collection.delete_one({"_id": oid})
-
-    return {"status": "deleted", "id": folder_id}
-
-
-# ---------------- UPLOAD / DELETE FILE ----------------
+# =========================================================
+# UPLOAD FILE (USER-SCOPED FIX)
+# =========================================================
 
 @app.post("/users/{user_id}/files")
-async def upload_file(user_id: str, path: str = Form(...), file: UploadFile = File(...)):
+async def upload_file(
+    user_id: str,
+    path: str = Form(...),
+    file: UploadFile = File(...),
+    current_user_id: str = Depends(get_current_user)
+):
+    if current_user_id != user_id:
+        raise HTTPException(403, "Not allowed")
 
     owner_id = ObjectId(user_id)
-
     text = await extract_text_from_upload(file)
 
     file_doc = await files_collection.insert_one({
@@ -260,15 +171,13 @@ async def upload_file(user_id: str, path: str = Form(...), file: UploadFile = Fi
 
     file_id = str(file_doc.inserted_id)
 
-    chunks = chunk_text(text)
-
-    for i, chunk in enumerate(chunks):
+    for i, chunk in enumerate(chunk_text(text)):
         await es.index(
             index="file_texts",
             document={
                 "file_id": file_id,
                 "chunk_id": i,
-                "owner_id": str(owner_id),
+                "owner_id": user_id,
                 "filename": file.filename,
                 "folder_path": path,
                 "text": chunk,
@@ -279,71 +188,86 @@ async def upload_file(user_id: str, path: str = Form(...), file: UploadFile = Fi
 
     return {"id": file_id, "filename": file.filename}
 
-@app.delete("/files/{file_id}")
-async def delete_file(file_id: str):
 
-    # validate ID
-    try:
-        oid = ObjectId(file_id)
-    except:
-        raise HTTPException(status_code=400, detail="Invalid file ID")
-
-    # check file exists
-    file = await files_collection.find_one({"_id": oid})
-
-    if not file:
-        raise HTTPException(status_code=404, detail="File not found")
-
-    # delete from MongoDB
-    await files_collection.delete_one({"_id": oid})
-
-    # delete ALL chunks from Elasticsearch
-    await es.delete_by_query(
-        index="file_texts",
-        query={
-            "term": {
-                "file_id": file_id
-            }
-        }
-    )
-
-    return {
-        "status": "deleted",
-        "file_id": file_id
-    }
-
-
-# ---------------- GET FILE TEXT ----------------
+# =========================================================
+# GET FILE TEXT (SECURED)
+# =========================================================
 
 @app.get("/files/{file_id}/text", response_class=PlainTextResponse)
 async def get_file_text(file_id: str, current_user_id: str = Depends(get_current_user)):
 
     res = await es.search(
         index="file_texts",
-        query={"term": {"file_id": file_id}},
+        query={
+            "bool": {
+                "must": [
+                    {"term": {"file_id": file_id}},
+                    {"term": {"owner_id": current_user_id}}
+                ]
+            }
+        },
         size=50
     )
 
     if not res["hits"]["hits"]:
         raise HTTPException(404, "Not found")
 
-    chunks = [h["_source"]["text"] for h in res["hits"]["hits"]]
-    return "\n".join(chunks)
+    return "\n".join([h["_source"]["text"] for h in res["hits"]["hits"]])
 
 
-# ---------------- SEMANTIC SEARCH (FILES ONLY) ----------------
+# =========================================================
+# DELETE FILE (SECURED)
+# =========================================================
 
-RELEVANCE_THRESHOLD = 1.15
-MIN_SNIPPETS = 1
+@app.delete("/files/{file_id}")
+async def delete_file(file_id: str, current_user_id: str = Depends(get_current_user)):
+
+    oid = ObjectId(file_id)
+
+    file = await files_collection.find_one({
+        "_id": oid,
+        "owner_id": ObjectId(current_user_id)
+    })
+
+    if not file:
+        raise HTTPException(404, "File not found")
+
+    await files_collection.delete_one({"_id": oid})
+
+    await es.delete_by_query(
+        index="file_texts",
+        query={
+            "bool": {
+                "must": [
+                    {"term": {"file_id": file_id}},
+                    {"term": {"owner_id": current_user_id}}
+                ]
+            }
+        }
+    )
+
+    return {"status": "deleted"}
+
+
+# =========================================================
+# SEMANTIC SEARCH (SECURED FIX)
+# =========================================================
 
 @app.get("/semantic-search")
-async def semantic_search(query: str, current_path: str, owner_id: str):
+async def semantic_search(
+    query: str,
+    current_path: str,
+    owner_id: str
+):
 
+    # ensure folder path format
     if not current_path.endswith("/"):
         current_path += "/"
 
+    # embed query
     query_vec = get_embedding(query)
 
+    # elasticsearch search
     resp = await es.search(
         index="file_texts",
         size=50,
@@ -358,13 +282,18 @@ async def semantic_search(query: str, current_path: str, owner_id: str):
                         "query": {"match_all": {}},
                         "script": {
                             "source": "cosineSimilarity(params.q, 'embedding') + 1.0",
-                            "params": {"q": query_vec}
+                            "params": {
+                                "q": query_vec
+                            }
                         }
                     }
                 }
             }
         }
     )
+
+    # ---------------- RELEVANCE THRESHOLD ----------------
+    MIN_RELEVANCE_SCORE = 1.15
 
     files = defaultdict(lambda: {
         "file_id": None,
@@ -377,7 +306,8 @@ async def semantic_search(query: str, current_path: str, owner_id: str):
     for hit in resp["hits"]["hits"]:
         score = hit["_score"]
 
-        if score < RELEVANCE_THRESHOLD:
+        # HARD FILTER (this is the key change)
+        if score < MIN_RELEVANCE_SCORE:
             continue
 
         src = hit["_source"]
@@ -394,105 +324,56 @@ async def semantic_search(query: str, current_path: str, owner_id: str):
 
     results = [
         f for f in files.values()
-        if f["score"] >= RELEVANCE_THRESHOLD and len(f["snippets"]) >= MIN_SNIPPETS
+        if f["score"] >= MIN_RELEVANCE_SCORE and len(f["snippets"]) >= 1
     ]
 
     return sorted(results, key=lambda x: x["score"], reverse=True)
 
-
-# ---------------- LLM SUMMARIZER ----------------
-
-import time
-import httpx
-from fastapi import HTTPException
+# =========================================================
+# ASK (SECURED FIX)
+# =========================================================
 
 @app.post("/ask")
-async def ask(payload: dict):
-
-    start = time.time()
-    print("\n================ ASK START ================")
+async def ask(payload: dict, current_user_id: str = Depends(get_current_user)):
 
     query = payload["query"]
     current_path = payload["current_path"]
-    owner_id = payload["owner_id"]
-
-    print(f"[1] Query: {query}")
-    print(f"[1] Path: {current_path}")
-    print(f"[1] Owner: {owner_id}")
 
     if not current_path.endswith("/"):
         current_path += "/"
 
-    # ---------------- embedding ----------------
-    print("[2] Generating embedding...")
-    t0 = time.time()
     query_vec = get_embedding(query)
-    print(f"[2 DONE] embedding size={len(query_vec)} time={time.time() - t0:.3f}s")
 
-    # ---------------- Elasticsearch ----------------
-    print("[3] Running Elasticsearch search...")
-
-    try:
-        t1 = time.time()
-
-        resp = await es.search(
-            index="file_texts",
-            size=20,
-            request_timeout=30,
-            query={
-                "bool": {
-                    "filter": [
-                        {"prefix": {"folder_path": current_path}},
-                        {"term": {"owner_id": owner_id}}
-                    ],
-                    "must": {
-                        "script_score": {
-                            "query": {"match_all": {}},
-                            "script": {
-                                "source": "cosineSimilarity(params.q, 'embedding') + 1.0",
-                                "params": {"q": query_vec}
-                            }
+    resp = await es.search(
+        index="file_texts",
+        size=20,
+        query={
+            "bool": {
+                "filter": [
+                    {"prefix": {"folder_path": current_path}},
+                    {"term": {"owner_id": current_user_id}}
+                ],
+                "must": {
+                    "script_score": {
+                        "query": {"match_all": {}},
+                        "script": {
+                            "source": "cosineSimilarity(params.q, 'embedding') + 1.0",
+                            "params": {"q": query_vec}
                         }
                     }
                 }
             }
-        )
+        }
+    )
 
-        print(f"[3 DONE] ES time={time.time() - t1:.3f}s")
-        print(f"[3 DONE] hits={len(resp['hits']['hits'])}")
+    context = "\n---\n".join(
+        f"[{h['_source']['filename']}] {h['_source']['text'][:400]}"
+        for h in resp["hits"]["hits"][:3]
+    )
 
-    except Exception as e:
-        print("❌ Elasticsearch failed:", repr(e))
-        raise HTTPException(500, "Elasticsearch error")
-
-    # ---------------- context building ----------------
-    print("[4] Building context...")
-
-    context_blocks = []
-
-    for i, hit in enumerate(resp["hits"]["hits"][:3]):
-        src = hit["_source"]
-
-        print(f"  - chunk {i} file={src['filename']} score={hit['_score']:.3f}")
-
-        context_blocks.append(
-        f"[{src['filename']}] {src['text'][:400]}"
-)
-
-    context = "\n---\n".join(context_blocks)
-
-    print(f"[4 DONE] context length={len(context)} chars")
-
-    # ---------------- prompt ----------------
     prompt = f"""
-You are a document QA system.
+Use only context.
 
-Rules:
-- Only use the context below
-- If answer is not in context, say "I don't know based on your files"
-- Be concise
-
-CONTEXT:
 {context}
 
 QUESTION:
@@ -501,31 +382,11 @@ QUESTION:
 ANSWER:
 """
 
-    print("[5] Sending request to LLM...")
-
-    # ---------------- LLM call ----------------
-    try:
-        t2 = time.time()
-
-        async with httpx.AsyncClient(timeout=120) as client:
-            res = await client.post(
-                "http://localhost:11434/api/generate",
-                json={
-                    "model": "phi3",
-                    "prompt": prompt,
-                    "stream": False
-                }
-            )
-
-        print(f"[5 DONE] LLM time={time.time() - t2:.3f}s")
-
-    except Exception as e:
-        print("❌ LLM request failed:", repr(e))
-        raise HTTPException(500, "LLM error")
-
-    # ---------------- response ----------------
-    print(f"[6] Total time={time.time() - start:.3f}s")
-    print("================ ASK END ================\n")
+    async with httpx.AsyncClient(timeout=120) as client:
+        res = await client.post(
+            "http://localhost:11434/api/generate",
+            json={"model": "phi3", "prompt": prompt, "stream": False}
+        )
 
     return {
         "answer": res.json().get("response", ""),
@@ -538,14 +399,91 @@ ANSWER:
         ]
     }
 
+# =========================================================
+# CREATE FOLDER (SECURED)
+# =========================================================
 
-# ---------------- AUTH ----------------
+@app.post("/users/{user_id}/folders")
+async def create_folder(
+    user_id: str,
+    folder: FolderCreate,
+    current_user_id: str = Depends(get_current_user)
+):
 
-@app.post("/signup")
-async def signup(user: dict):
-    return await register_user_controller(user)
+    # 🔒 prevent cross-user folder creation
+    if current_user_id != user_id:
+        raise HTTPException(status_code=403, detail="Not allowed")
+
+    owner_id = ObjectId(user_id)
+
+    # verify user exists
+    user = await users_collection.find_one({"_id": owner_id})
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    # check duplicate folder
+    existing = await files_collection.find_one({
+        "owner_id": owner_id,
+        "folder_path": folder.path,
+        "filename": folder.filename,
+        "is_folder": True
+    })
+
+    if existing:
+        raise HTTPException(status_code=400, detail="Folder already exists")
+
+    # create folder
+    result = await files_collection.insert_one({
+        "filename": folder.filename,
+        "owner_id": owner_id,
+        "folder_path": folder.path,
+        "is_folder": True,
+        "upload_timestamp": datetime.now(timezone.utc)
+    })
+
+    return {
+        "id": str(result.inserted_id),
+        "filename": folder.filename
+    }
 
 
-@app.post("/login")
-async def login(user: dict):
-    return await login_user_controller(user)
+# =========================================================
+# DELETE FOLDER (SECURED)
+# =========================================================
+
+@app.delete("/folders/{folder_id}")
+async def delete_folder(
+    folder_id: str,
+    current_user_id: str = Depends(get_current_user)
+):
+
+    try:
+        oid = ObjectId(folder_id)
+    except:
+        raise HTTPException(status_code=400, detail="Invalid folder ID")
+
+    folder = await files_collection.find_one({
+        "_id": oid,
+        "owner_id": ObjectId(current_user_id)
+    })
+
+    if not folder:
+        raise HTTPException(status_code=404, detail="Folder not found")
+
+    if not folder.get("is_folder"):
+        raise HTTPException(status_code=400, detail="Not a folder")
+
+    # check if folder contains files
+    prefix = folder["folder_path"] + folder["filename"] + "/"
+
+    child = await files_collection.find_one({
+        "owner_id": ObjectId(current_user_id),
+        "folder_path": prefix
+    })
+
+    if child:
+        raise HTTPException(status_code=400, detail="Folder not empty")
+
+    await files_collection.delete_one({"_id": oid})
+
+    return {"status": "deleted", "id": folder_id}

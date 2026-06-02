@@ -10,5 +10,5 @@ class UserLogin(BaseModel):
     password: str
 
 class FolderCreate(BaseModel):
-    path: str
     filename: str
+    path: str
